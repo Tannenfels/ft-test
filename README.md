@@ -1,58 +1,62 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Структура БД
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+(миграции см. в `/database/migrations`)
 
-## About Laravel
+## таблица `users`: пользователи
+- `name`
+- `email`
+- `phone`
+## таблица `orders`: заказы
+- `user_id` -> `users.id`: в рамках задачи считается что пользователи авторизованные в системе и есть заказчики
+- `status`: статус заказа (new, in_process, ...)
+- `created_at`
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## таблица `goods`: товары
+- `name`: название товара
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## таблица `orders_goods`: связь заказов с товарами, т.е. условно наша корзина к оплате
+- `order_id` -> `orders.id`
+- `goods_id` -> `goods.id`
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## таблица `delivery_units`: одновременно И адреса самовывоза, И пункты выдачи, И что угодно что потом в способы доставки будет добавлено в будущем
+- `address`: адрес доставки
+- `type_id` -> `delivery_types.id`: id типа доставки, может быть что угодно, СВ, ПВЗ, ...
+- `user_id`: необязательный параметр, нужен будет, чтобы пользователь мог выбирать свои прошлые адреса из списка
 
-## Learning Laravel
+## таблица `deliveries`: доставки
+- `unit_id` -> `delivery_units_id`
+- `order_id` -> `orders.id`
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+## таблица `payments`: данные платежа
+- `status`: new, in_process, ...
+- `type_id` -> `payment_types.id` : в рамках задачи способов оплаты всего два, безнал/кредит, в дальнейшем можно будет добавить сколько угодно
+- `data`: JSONB в котором хранится всякая необходимая информация для платежа (последние 4 цифры карты итд). NULL если это кредит
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+## таблица `loans`: кредиты
+- `bank_id` -> `banks.id`: ID кредитного учереждения
+- `payment_id` -> `payments.id`: ID платежа (с заделом на то, что, возможно, у платежей в будущем можеть быть больше 1 кредита)
+- `duration`: срок в месяцах
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+## таблица `banks`: кредитные учреждения
+- `name`
 
-## Agentic Development
 
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+# Условная реализация БД
+## `OrderController`
+### `::create()`:
+#### Необходимые данные: 
+* `goods_ids`: массив ID товаров, предполагается, что фронтенд знает их с некоего другого эндпоинта
+* `payments_type_id`: ID способа оплаты, аналогично
+* `payment_data`: JSON, содержащий в себе данные оплаты (не реализовано, но предполагается, что `CreateOrderService` разбирает этот JSON)
+* `delivery_type_id`: ID типа доставки, аналогично пп. 1, 2
+* `delivery_unit_data`: либо id пункта выдачи, либо id из сохранённых адресов, либо новый адрес пользователя
+!Телефон, email, имя пользователя итд. берутся из сущности User!
 
-```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
-```
-
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
-
-## Contributing
-
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
-
-## Code of Conduct
-
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
-
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+#### БЛ:
+1. Сначала ищем DeliveryUnit в системе, если нет - создаём из данных реквеста
+2. Передаём данные оплаты, доставки, корзины в `CreateOrderService`
+3. Создаём связь между заказом и товарами (условно, корзина)
+4. Эквайринг/оформление кредита
+5. Привязка доставки к заказу
+6. Статус заказа "in_delivery"
+7. Закрытие заказа по доставке, если не кредит, статус "loan" в противном случае
