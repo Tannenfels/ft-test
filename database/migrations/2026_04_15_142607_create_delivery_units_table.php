@@ -11,7 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('delivery_types', function (Blueprint $table) {
+        Schema::create('delivery_units', function (Blueprint $table) {
             $table->id();
             $table->string('address');
             $table->unsignedBigInteger('type_id');
